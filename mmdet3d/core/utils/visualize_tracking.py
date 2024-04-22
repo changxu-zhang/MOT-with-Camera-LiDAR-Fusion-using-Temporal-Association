@@ -138,8 +138,8 @@ def visualize_lidar(
 
     if lidar is not None:
         plt.scatter(
-            lidar[:, 0],
-            lidar[:, 1],
+            lidar[-1, :, 0],
+            lidar[-1, :, 1],
             s=radius,
             c="white",
         )

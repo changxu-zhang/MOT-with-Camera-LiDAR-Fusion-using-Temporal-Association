@@ -84,51 +84,39 @@ class BEVFusion(Base3DFusionModel):
         '''
         start of modification
         '''
+        # temporal decoder
         # self.red_conv = nn.Conv2d(512, 256, (1, 1), 1)
         # self.red_pool = nn.MaxPool2d(3, 3, return_indices=True)
-        # self.red_pool = nn.MaxPool2d(2, 2, return_indices=True)
-        # self.red_pool_key = nn.MaxPool2d(3, 3, return_indices=True)
         # self.unpool = nn.MaxUnpool2d(3, 3, padding=0)
-        # self.unpool = nn.MaxUnpool2d(2, 2, padding=0)
         
-        # self.temporal = TransformerDecoderLayer(
-        #     d_model=512,
-        #     nhead=8,    
-        # )
-        # self.temporal_encoder = nn.TransformerEncoderLayer(
-        #     d_model=512,
-        #     nhead=8,    
-        #     batch_first=True
-        # )
-        self.temporal_swin = SwinTransformer(in_channels=1024, embed_dims=512, num_heads=(8, 16, 32, 32), patch_size=1, window_size=3, strides=(1, 2, 5, 16))
-        # self.conv_swin = nn.Conv2d(3840, 512, (1, 1), 1)
-        self.conv_swin_1 = nn.Conv2d(1024, 256, (1, 1), 1)
-        self.conv_swin_2 = nn.Conv2d(2048, 64, (1, 1), 1)
-        self.conv_swin_3 = nn.Conv2d(4096, 1, (1, 1), 1)
-        self.conv_swin = nn.Conv2d(512+256+64+1, 512, (1, 1), 1)
+        self.red_pool = nn.MaxPool2d(2, 2, return_indices=True)
+        self.unpool = nn.MaxUnpool2d(2, 2, padding=0)
+        self.red_pool_key = nn.MaxPool2d(3, 3, return_indices=False)
         
+        self.temporal_decoder = TransformerDecoderLayer(
+            d_model=512,
+            nhead=8,    
+        )
+       
         # copy-paste from def create_2D_grid in transfusion to build pos embedding for decoder
-        # x_size = 90 # 60
-        # y_size = 90 # 60
-        # meshgrid = [[0, x_size - 1, x_size], [0, y_size - 1, y_size]]
-        # batch_x, batch_y = torch.meshgrid(*[torch.linspace(it[0], it[1], it[2]) for it in meshgrid])
-        # batch_x = batch_x + 0.5
-        # batch_y = batch_y + 0.5
-        # coord_base = torch.cat([batch_x[None], batch_y[None]], dim=0)[None]
-        # self.x_pos = coord_base.view(1, 2, -1).permute(0, 2, 1)
+        x_size = 90 # 60
+        y_size = 90 # 60
+        meshgrid = [[0, x_size - 1, x_size], [0, y_size - 1, y_size]]
+        batch_x, batch_y = torch.meshgrid(*[torch.linspace(it[0], it[1], it[2]) for it in meshgrid])
+        batch_x = batch_x + 0.5
+        batch_y = batch_y + 0.5
+        coord_base = torch.cat([batch_x[None], batch_y[None]], dim=0)[None]
+        self.x_pos = coord_base.view(1, 2, -1).permute(0, 2, 1)
         
-        # x_size = 60
-        # y_size = 60
-        # meshgrid = [[0, x_size - 1, x_size], [0, y_size - 1, y_size]]
-        # batch_x, batch_y = torch.meshgrid(*[torch.linspace(it[0], it[1], it[2]) for it in meshgrid])
-        # batch_x = batch_x + 0.5
-        # batch_y = batch_y + 0.5
-        # coord_base = torch.cat([batch_x[None], batch_y[None]], dim=0)[None]
-        # self.x_pos_key = coord_base.view(1, 2, -1).permute(0, 2, 1)
+        x_size = 60
+        y_size = 60
+        meshgrid = [[0, x_size - 1, x_size], [0, y_size - 1, y_size]]
+        batch_x, batch_y = torch.meshgrid(*[torch.linspace(it[0], it[1], it[2]) for it in meshgrid])
+        batch_x = batch_x + 0.5
+        batch_y = batch_y + 0.5
+        coord_base = torch.cat([batch_x[None], batch_y[None]], dim=0)[None]
+        self.x_pos_key = coord_base.view(1, 2, -1).permute(0, 2, 1)
         
-        # init x_query
-        # self.x_query = torch.zeros((4, 512 ,200), device='cuda')
-        # self.query_pos = torch.zeros((4, 200, 2), device='cuda')
         '''
         end of modification
         '''
@@ -348,11 +336,11 @@ class BEVFusion(Base3DFusionModel):
     ):
         bs, len_queue, num_cams, C, H, W = img.shape
         img = img.reshape(bs*len_queue, num_cams, C, H, W)
-        self.save_tensor(img, metas[0][1]['token']+'_img.pt')
+        # self.save_tensor(img, metas[0][1]['token']+'_img.pt')
         
         _, _, num_pc, pc = points.shape
         points = points.reshape(bs*len_queue, num_pc, pc)
-        self.save_tensor(points, metas[0][1]['token']+'_points.pt')
+        # self.save_tensor(points, metas[0][1]['token']+'_points.pt')
         
         # flatten nested list
         for bs_idx in range(bs):
@@ -440,95 +428,46 @@ class BEVFusion(Base3DFusionModel):
         batch_size = x.shape[0]
 
         x = self.decoder["backbone"](x)
-        x = self.decoder["neck"](x)
-        # x: list [tensor (4, 512, 180, 180)]
-        
-        # reduce number of features c
-        # x = self.red_conv(x[0])
+        x = self.decoder["neck"](x) # [4, 512, 180, 180]
         
         # split current and history features TODO: better workaround for different bs
         x = x[0]
         if bs == 2:
             x_current = torch.stack((x[len_queue - 1, ...], x[len_queue * bs - 1, ...]), dim=0) # only works for bs=2 right now
             x_history = torch.cat((x[:len_queue - 1, ...], x[len_queue:len_queue * bs - 1, ...]), dim=0)
+            x_ori = x_current # for residual connection later
         else: # bs == 1:
             x_current = x[len_queue - 1, ...].unsqueeze(0)
             x_history = x[:len_queue - 1, ...]
+            x_ori = x_current # for residual connection later
 
+        # self.save_tensor(x_current, metas[0]['token']+'_current.pt')
+        # self.save_tensor(x_history, metas[0]['token']+'_history.pt')
         # reduce size of bev h, w to ovoid oom
-        # x_current, indices_pool_current = self.red_pool(x_current) 
-        # x_history, indices_pool_history = self.red_pool_key(x_history) # stride=3 (4, 512, 60, 60)
-        # x, indices_pool = self.red_pool(x[0]) # stride=3 (4, 512, 60, 60)
-        # c, h, w = x.shape[-3:]
+        x_current, indices_pool_current = self.red_pool(x_current) 
+        x_history = self.red_pool_key(x_history) # stride=3 (4, 512, 60, 60)
         c, h, w = x_current.shape[-3:]
         
-        # flatten before input into temporal
-        # x_flatten = x[0].view(batch_size, c, -1) # [BS, C, H*W]
-        # x_current_flatten = x_current.view(batch_size//len_queue, x_current.shape[1], -1)
-        # x_history_flatten = x_history.view(batch_size//len_queue, x_history.shape[1], -1)
+        # flatten before input into temporal 
+        x_current_flatten = x_current.view(batch_size//len_queue, x_current.shape[1], -1) # [BS, C, H*W]
+        x_history_flatten = x_history.view(batch_size//len_queue, x_history.shape[1], -1)
 
-        # x_pos = self.x_pos.repeat(batch_size // 2, 1, 1).to(x_flatten.device)
-        # x_pos = self.x_pos.repeat(batch_size // 2, 1, 1).to(x_current_flatten.device)
-        # x_pos_key = self.x_pos_key.repeat(batch_size // 2, 1, 1).to(x_current_flatten.device)
-        
-        # split current and history features TODO: better workaround for different bs
-        # if bs == 1:
-        #     x_current = x_flatten[len_queue - 1, ...].unsqueeze(0)
-        #     x_history = x_flatten[:len_queue - 1, ...]
-        #     # indices_pool_current = indices_pool[len_queue - 1, ...].unsqueeze(0)
-        # else: # when bs=2
-        #     x_current = torch.stack((x_flatten[len_queue - 1, ...], x_flatten[len_queue * bs - 1, ...]), dim=0) # only works for bs=2 right now
-        #     x_history = torch.cat((x_flatten[:len_queue - 1, ...], x_flatten[len_queue:len_queue * bs - 1, ...]), dim=0)
-        #     # indices_pool_current = torch.stack((indices_pool[len_queue - 1, ...], indices_pool[len_queue * bs - 1, ...]), dim=0)
-        # elif bs == 4: # when bs=4
-        #     x_current = torch.stack((x_flatten[len_queue - 1, ...], x_flatten[len_queue * (bs-2) - 1, ...], x_flatten[len_queue * (bs-1) - 1, ...], x_flatten[len_queue * bs - 1, ...]), dim=0) # only works for bs=2 right now
-        #     x_history = torch.cat((x_flatten[:len_queue - 1, ...], x_flatten[len_queue * (bs-3):len_queue * (bs-2) - 1, ...], x_flatten[len_queue * (bs-2):len_queue * (bs-1) - 1, ...], x_flatten[len_queue * (bs-1):len_queue * bs - 1, ...]), dim=0)
-        #     indices_pool_current = torch.stack((indices_pool[len_queue - 1, ...], indices_pool[len_queue * (bs-2) - 1, ...], indices_pool[len_queue * (bs-1) - 1, ...], indices_pool[len_queue * bs - 1, ...]), dim=0)
-        
-        # encoder layer
-        # x_flatten = x.permute(0, 2, 3, 1) # [BS, H*W, C]
-        # x = self.temporal_encoder(x_flatten)
-        
-        combined_tensor = torch.cat([x_current, x_history], dim=1)
-        self.save_tensor(x_current, metas[0]['token']+'_current_bev.pt')
-        # combined_tensor_curhis = torch.cat([x_current, x_history], dim=1)
-        # combined_tensor_hiscur = torch.cat([x_history, x_current], dim=1)
-        # combined_tensor = torch.zeros(2, 1024, 360, 360).to(x.device)
-
-        # indices_current = [(0, 0), (0, 2), (1, 1), (2, 0), (2, 2)]
-        # indices_history = [(0, 1), (1, 0), (1, 2), (2, 1)]
-        # indices_current = [(0, 0), (1, 1)]
-        # indices_history = [(0, 1), (1, 0)]
-
-        # for idx in indices_current:
-        #     combined_tensor[:, :, idx[0] * 180:(idx[0] + 1) * 180, idx[1] * 180:(idx[1] + 1) * 180] = combined_tensor_curhis
-        # for idx in indices_history:
-        #     combined_tensor[:, :, idx[0] * 180:(idx[0] + 1) * 180, idx[1] * 180:(idx[1] + 1) * 180] = combined_tensor_hiscur
-    
-        x = self.temporal_swin(combined_tensor)
-        self.save_tensor(x, metas[0]['token']+'_bev_after_temporal.pt')
-
-        # upsampled_x_0 = F.interpolate(x[0], size=(180, 180), mode='bilinear', align_corners=False)
-        
-        upsampled_x_1 = F.interpolate(x[1], size=(180, 180), mode='bilinear', align_corners=False)
-        upsampled_x_1 = self.conv_swin_1(upsampled_x_1)
-        
-        upsampled_x_2 = F.interpolate(x[2], size=(180, 180), mode='bilinear', align_corners=False)
-        upsampled_x_2 = self.conv_swin_2(upsampled_x_2)
-        
-        upsampled_x_3 = F.interpolate(x[3], size=(180, 180), mode='bilinear', align_corners=False)
-        upsampled_x_3 = self.conv_swin_3(upsampled_x_3)
-        x = torch.cat([x[0], upsampled_x_1, upsampled_x_2, upsampled_x_3,], dim=1)
-        # x = x[0] + upsampled_x_1 * 0 + upsampled_x_2 * 0 + upsampled_x_3 * 0
-        x = self.conv_swin(x)
+        x_pos = self.x_pos.repeat(batch_size // 2, 1, 1).to(x_current_flatten.device)
+        x_pos_key = self.x_pos_key.repeat(batch_size // 2, 1, 1).to(x_current_flatten.device)
         
         # decoder layer
-        # x = self.temporal(x_current_flatten, x_history_flatten, x_pos, x_pos_key)
-
-        # x = x.view(batch_size // len_queue, c, h, w)
+        x = self.temporal_decoder(x_current_flatten, x_history_flatten, x_pos, x_pos_key, weight_out=True)
+        # self.save_tensor(x[1], metas[0]['token']+'_self.pt')
+        # self.save_tensor(x[2], metas[0]['token']+'_cross.pt')
+        
+        
+        x = x[0].view(batch_size // len_queue, c, h, w)
         
         # unpool back to (2, 512, 180, 180)
-        # x = self.unpool(x, indices_pool_current)
+        x = self.unpool(x, indices_pool_current)
+        
+        # residual connection
+        x += x_ori
         
         if self.training:
             outputs = {}
@@ -580,7 +519,7 @@ class BEVFusion(Base3DFusionModel):
             return outputs
 
     def save_tensor(self, tensor, filename='tensor_saved.pt'):
-        filename = 'save_tensors/' + filename
+        filename = '/data_from_host/shared/datasets/nuscenes/visualization_results/tensors/qk_weight_tam/' + filename
         try:
             torch.save(tensor, filename)
             print(f"Tensor saved successfully to {filename}")

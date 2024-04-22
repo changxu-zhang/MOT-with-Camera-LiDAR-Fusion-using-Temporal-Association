@@ -69,12 +69,14 @@ def visualize_camera(
         indices = np.all(coords[..., 2] > 0, axis=1)
         coords = coords[indices]
         labels = labels[indices]
-        scores = scores[indices]
+        if scores is not None:
+            scores = scores[indices]
 
         indices = np.argsort(-np.min(coords[..., 2], axis=1))
         coords = coords[indices]
         labels = labels[indices]
-        scores = scores[indices]
+        if scores is not None:
+            scores = scores[indices]
 
         coords = coords.reshape(-1, 4)
         coords[:, 2] = np.clip(coords[:, 2], a_min=1e-5, a_max=1e5)
@@ -106,7 +108,8 @@ def visualize_camera(
                     thickness,
                     cv2.LINE_AA,
                 )
-            cv2.putText(canvas, str(round(scores[index], 2)), coords[index, 7].astype(np.int), cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=(255, 255, 255), thickness=2)
+            if scores is not None:
+                cv2.putText(canvas, str(round(scores[index], 2)), coords[index, 7].astype(np.int), cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=(255, 255, 255), thickness=2)
         canvas = canvas.astype(np.uint8)
     canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
 
@@ -137,8 +140,8 @@ def visualize_lidar(
 
     if lidar is not None:
         plt.scatter(
-            lidar[:, 0],
-            lidar[:, 1],
+            lidar[-1, :, 0],
+            lidar[-1, :, 1],
             s=radius,
             c="white",
         )

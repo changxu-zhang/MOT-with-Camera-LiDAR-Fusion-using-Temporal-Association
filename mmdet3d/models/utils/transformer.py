@@ -68,7 +68,7 @@ class TransformerDecoderLayer(nn.Module):
     def with_pos_embed(self, tensor, pos_embed):
         return tensor if pos_embed is None else tensor + pos_embed
 
-    def forward(self, query, key, query_pos, key_pos, attn_mask=None):
+    def forward(self, query, key, query_pos, key_pos, attn_mask=None, weight_out=False):
         """
         :param query: B C Pq
         :param key: B C Pk
@@ -92,13 +92,19 @@ class TransformerDecoderLayer(nn.Module):
 
         if not self.cross_only:
             q = k = v = self.with_pos_embed(query, query_pos_embed)
-            query2 = self.self_attn(q, k, value=v)[0]
+            query2_and_weight = self.self_attn(q, k, value=v)
+            query2 = query2_and_weight[0]
+            if weight_out is True:
+                weight_self = query2_and_weight[1]
             query = query + self.dropout1(query2)
             query = self.norm1(query)
 
-        query2 = self.multihead_attn(query=self.with_pos_embed(query, query_pos_embed),
+        query2_and_weight = self.multihead_attn(query=self.with_pos_embed(query, query_pos_embed),
                                      key=self.with_pos_embed(key, key_pos_embed),
-                                     value=self.with_pos_embed(key, key_pos_embed), attn_mask=attn_mask)[0]
+                                     value=self.with_pos_embed(key, key_pos_embed), attn_mask=attn_mask)
+        query2 = query2_and_weight[0]
+        if weight_out is True:
+            weight_cross = query2_and_weight[1]
         query = query + self.dropout2(query2)
         query = self.norm2(query)
 
@@ -108,8 +114,10 @@ class TransformerDecoderLayer(nn.Module):
 
         # NxCxP to PxNxC
         query = query.permute(1, 2, 0)
-        return query
-
+        if weight_out is True:
+            return query, weight_self, weight_cross
+        else:
+            return query
 
 class MultiheadAttention(nn.Module):
     r"""Allows the model to jointly attend to information
