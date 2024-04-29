@@ -75,3 +75,8 @@ Then, we can visualize tracking results:
 ```bash
 python tools/track/visualize_tracking.py [path_to_config] --checkpoint [path_to_tracking_result.pkl] --out-dir [path_to_vis_result] --mode [pred or gt] --bbox-score [confidence e.g. 0.01]
 ```
+
+## Result
+[Checkpoints](https://tubcloud.tu-berlin.de/s/kNrqQifZmNia3Hr) are available.
+
+[Detection](https://tubcloud.tu-berlin.de/s/W5TfWb5pFZZnXpq) and [Tracking](https://tubcloud.tu-berlin.de/s/9zxGQKnQy6sHrTn) results are also provided.
