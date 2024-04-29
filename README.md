@@ -1,12 +1,11 @@
 # MOT with Camera-LiDAR Fusion using Temporal Association
 
-## Abstract
 
 ## TODO
 - [x] complete readme
 - [x] detector and tracker
 - [x] script for format conversion
-- [] upload checkpoint in drive
+- [x] upload checkpoint in drive
 - [] provide docker file/image
 
 ## Usage
